@@ -9,5 +9,7 @@ namespace NewsFunction.Services
     public interface INewsService
     {
         Task<List<Article>> LoadNews(string q);
+
+        //Task<List<Article>> LoadHeadlines(string q);
     }
 }
