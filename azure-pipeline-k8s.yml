@@ -1,0 +1,66 @@
+trigger:
+- master
+
+pool:
+  vmImage: 'windows-latest'
+
+variables:
+  podName: ''
+  imageName: ''
+  acrName: ''
+  acrEndpoint: ''
+  aksName: ''
+  aksEndpoint: ''
+  rgName: ''
+
+steps:
+- task: Docker@2
+  displayName: 'Create and Push container'
+  inputs:
+    containerRegistry: '$(acrEndpoint)'
+    repository: functionapponk8s
+    Dockerfile: Dockerfile
+
+- task: Kubernetes@1
+  displayName: 'Create POD'
+  inputs:
+    kubernetesServiceEndpoint: '$(aksEndpoint)'
+    command: run
+    arguments: '$(podName) --image=$(acrName).azurecr.io/$(imageName):$(Build.BuildId) --port=80 --requests=cpu=100m'
+
+- task: Kubernetes@1
+  displayName: 'Assign Load Balancer'
+  inputs:
+    kubernetesServiceEndpoint: 'AKS - Demo'
+    command: expose
+    arguments: 'pod $(podName) --type=LoadBalancer'
+
+- task: AzureCLI@2
+  displayName: 'Retrieve IP address'
+  inputs:
+    azureSubscription: Demo
+    scriptType: pscore
+    scriptLocation: inlineScript
+    inlineScript: |
+     # Set credentials for kubectl
+     az aks get-credentials --resource-group "$(rgName)" --name "$(aksName)"
+     
+     # Let's wait 60 seconds for the IP to propagate...
+     Start-Sleep -s 60
+     
+     # Print the services enabled on the console
+     kubectl get svc $(podName)
+     
+     # Get public IP adddress
+     $ipAddress = kubectl get svc $(podName) -o jsonpath="{.status.loadBalancer.ingress[0].ip}"
+     Write-Host $ipAddress 
+     
+     # Set the environment variable so that the IP address can be used in another tasks
+     Write-Host "##vso[task.setvariable variable=ipAddress]$ipAddress"
+
+- powershell: |
+   $url = "http://$(ipAddress)/api/QueryNews?q=covid"
+   $response = curl -s $url   
+   echo $response
+  pwsh: true
+  displayName: 'Check liveliness'
